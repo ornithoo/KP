@@ -1,158 +1,205 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
+import { supabase } from "@/lib/supabaseClient";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faMagnifyingGlass } from "@fortawesome/free-solid-svg-icons";
+import {
+  faMagnifyingGlass,
+  faTrash,
+  faPen,
+  faXmark,
+} from "@fortawesome/free-solid-svg-icons";
+
 type Item = {
   id: string;
   nama: string;
   size: string | null;
   image_path: string | null;
-  created_at?: string;
 };
-
-function getErrorMessage(err: unknown) {
-  if (err instanceof Error) return err.message;
-  return "Terjadi error";
-}
 
 function getPublicImageUrl(imagePath: string | null) {
   if (!imagePath) return null;
 
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const bucket = process.env.NEXT_PUBLIC_SUPABASE_BUCKET;
-
   if (!base || !bucket) return null;
 
-  const encodedPath = imagePath
-    .split("/")
-    .map((p) => encodeURIComponent(p))
-    .join("/");
-
-  return `${base.replace(/\/$/, "")}/storage/v1/object/public/${bucket}/${encodedPath}`;
+  return `${base}/storage/v1/object/public/${bucket}/${imagePath}`;
 }
 
 export default function ItemPage() {
   const [q, setQ] = useState("");
   const [items, setItems] = useState<Item[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState("");
+  const [editItem, setEditItem] = useState<Item | null>(null);
+  const [editNama, setEditNama] = useState("");
+  const [editSize, setEditSize] = useState("");
 
-  const load = useCallback(async (keyword: string) => {
-    setLoading(true);
-    setErr("");
-
-    try {
-      const res = await fetch(`/api/items?q=${encodeURIComponent(keyword)}`, {
+  /* ================= FETCH DATA ================= */
+  useEffect(() => {
+    const fetchData = async () => {
+      const res = await fetch(`/api/items?q=${encodeURIComponent(q)}`, {
         cache: "no-store",
       });
-
-      const json: { data?: Item[]; error?: string } = await res.json();
-      if (!res.ok) throw new Error(json.error || "Gagal mengambil data");
-
+      const json = await res.json();
       setItems(json.data || []);
-    } catch (e: unknown) {
-      setItems([]);
-      setErr(getErrorMessage(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    };
 
-  useEffect(() => {
-    load("");
-  }, [load]);
+    const delay = setTimeout(fetchData, 300);
+    return () => clearTimeout(delay);
+  }, [q]);
 
-  useEffect(() => {
-    const t = setTimeout(() => load(q.trim()), 300);
-    return () => clearTimeout(t);
-  }, [q, load]);
+  /* ================= DELETE ================= */
+  async function handleDelete(id: string) {
+    const ok = confirm("Yakin hapus barang ini?");
+    if (!ok) return;
+
+    await supabase.from("items").delete().eq("id", id);
+    setItems((prev) => prev.filter((i) => i.id !== id));
+  }
+
+  /* ================= UPDATE ================= */
+  async function handleUpdate() {
+    if (!editItem) return;
+
+    await supabase
+      .from("items")
+      .update({
+        nama: editNama,
+        size: editSize,
+      })
+      .eq("id", editItem.id);
+
+    setEditItem(null);
+    setItems((prev) =>
+      prev.map((i) =>
+        i.id === editItem.id
+          ? { ...i, nama: editNama, size: editSize }
+          : i
+      )
+    );
+  }
 
   return (
-    <main className="min-h-screen w-full bg-white overflow-x-hidden">
-      {/* TOP BAR */}
-      <header className="w-full bg-orange-400">
-        <div className="h-12 flex items-center justify-center">
-          <span className="text-base font-semibold">Product & Tools</span>
-        </div>
+    <main className="min-h-screen bg-white">
+      <header className="bg-orange-400 h-12 flex items-center justify-center font-bold">
+        Product & Tools
       </header>
 
       <section className="max-w-6xl mx-auto px-6 py-10">
-        <h1 className="text-center text-3xl font-bold italic tracking-wide">
+        <h1 className="text-center text-3xl font-bold italic">
           PENDATAAN BARANG GUDANG
         </h1>
 
         {/* SEARCH */}
         <div className="mt-10 flex justify-center">
-          <div className="w-full max-w-5xl bg-orange-400 rounded-full px-8 py-4 flex items-center shadow-lg">
+          <div className="w-full max-w-4xl bg-orange-400 rounded-full px-6 py-3 flex items-center">
             <input
-              className="w-full bg-transparent placeholder-white/90 text-white outline-none font-bold italic text-lg"
+              className="w-full bg-transparent text-white placeholder-white outline-none font-bold italic"
               placeholder="Search Product"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
-            <span className="ml-4 text-white text-2xl select-none">
-              <FontAwesomeIcon icon={faMagnifyingGlass} />
-            </span>
+            <FontAwesomeIcon
+              icon={faMagnifyingGlass}
+              className="text-white ml-4"
+            />
           </div>
         </div>
-  
-        {/* STATUS */}
-        <div className="mt-5 text-center text-sm">
-          {loading ? (
-            <span className="text-gray-700">Loading...</span>
-          ) : err ? (
-            <span className="text-red-600 font-semibold">Error: {err}</span>
-          ) : (
-            <span className="text-gray-600">Hasil: {items.length} item</span>
-          )}
-        </div>
 
-        <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-10">
+        {/* GRID */}
+        <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-10">
           {items.map((it) => {
-            const imgUrl = getPublicImageUrl(it.image_path);
+            const img = getPublicImageUrl(it.image_path);
 
             return (
               <div
                 key={it.id}
-                className="rounded-2xl overflow-hidden shadow-lg border bg-white"
+                className="rounded-2xl overflow-hidden border shadow-lg bg-white"
               >
                 <div className="bg-slate-900 text-white p-4 text-center">
-                  <div className="font-bold italic uppercase text-lg">
-                    {it.nama}
-                  </div>
-                  <div className="text-xs font-semibold opacity-90 mt-1">
-                    {it.size || "-"}
-                  </div>
+                  <div className="font-bold italic">{it.nama}</div>
+                  <div className="text-xs">{it.size || "-"}</div>
                 </div>
 
-                <div className="relative h-56 bg-gray-200">
-                  {imgUrl ? (
-                    <Image
-                      src={imgUrl}
-                      alt={it.nama}
-                      fill
-                      sizes="(max-width: 768px) 100vw, 33vw"
-                      className="object-cover"
-                    />
+                <div className="relative h-52 bg-gray-200">
+                  {img ? (
+                    <Image src={img} alt={it.nama} fill className="object-cover" />
                   ) : (
-                    <div className="h-full flex items-center justify-center text-gray-500 font-semibold">
-                      FOTO BARANG
+                    <div className="h-full flex items-center justify-center text-gray-500">
+                      NO IMAGE
                     </div>
                   )}
+                </div>
+
+                {/* ACTION */}
+                <div className="flex justify-between p-4">
+                  <button
+                    onClick={() => {
+                      setEditItem(it);
+                      setEditNama(it.nama);
+                      setEditSize(it.size || "");
+                    }}
+                    className="text-blue-600 font-semibold flex items-center gap-2"
+                  >
+                    <FontAwesomeIcon icon={faPen} />
+                    Edit
+                  </button>
+
+                  <button
+                    onClick={() => handleDelete(it.id)}
+                    className="text-red-600 font-semibold flex items-center gap-2"
+                  >
+                    <FontAwesomeIcon icon={faTrash} />
+                    Hapus
+                  </button>
                 </div>
               </div>
             );
           })}
         </div>
 
-        {!loading && !err && items.length === 0 ? (
-          <div className="mt-10 text-center text-gray-600 font-semibold">
-            Barang tidak ditemukan.
-          </div>
-        ) : null}
+        {items.length === 0 && (
+          <p className="text-center text-gray-500 mt-10">
+            Barang tidak ditemukan
+          </p>
+        )}
       </section>
+
+      {/* MODAL EDIT */}
+      {editItem && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md">
+            <div className="flex justify-between mb-4">
+              <h2 className="font-bold">Edit Barang</h2>
+              <button onClick={() => setEditItem(null)}>
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+
+            <input
+              className="w-full border rounded p-2 mb-3"
+              value={editNama}
+              onChange={(e) => setEditNama(e.target.value)}
+              placeholder="Nama Barang"
+            />
+
+            <input
+              className="w-full border rounded p-2 mb-4"
+              value={editSize}
+              onChange={(e) => setEditSize(e.target.value)}
+              placeholder="Size"
+            />
+
+            <button
+              onClick={handleUpdate}
+              className="w-full bg-orange-400 py-2 rounded font-bold"
+            >
+              Simpan Perubahan
+            </button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
